@@ -37,12 +37,14 @@ async def process_and_speak(vc, audio_path):
     """
     try:
         print("Processing audio file with Gemini...")
-        
-        # Open the recorded audio file from the voice channel session
+        if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
+            print("Audio file is empty or missing. Skipping.")
+            return
+            
         with open(audio_path, "rb") as f:
             audio_bytes = f.read()
 
-        # Target the correct model using standard generate_content
+        # Target the correct model using standard generate_content using explicit types
         response = ai_client.models.generate_content(
             model='gemini-2.5-flash',
             contents=[
@@ -57,13 +59,18 @@ async def process_and_speak(vc, audio_path):
             )
         )
 
-        # Extract the raw spoken audio bytes from the response candidates safely
-        reply_audio_data = response.candidates[0].content.parts[0].inline_data.data
-        audio_stream = io.BytesIO(reply_audio_data)
+        if response.candidates and response.candidates[0].content.parts:
+            reply_audio_data = response.candidates[0].content.parts[0].inline_data.data
+            audio_stream = io.BytesIO(reply_audio_data)
 
-        # Play the response audio directly back inside the voice channel
-        print("Streaming Gemini voice response back to VC...")
-        vc.play(discord.FFmpegPCMAudio(audio_stream, pipe=True))
+            # Play the response audio directly back inside the voice channel
+            print("Streaming Gemini voice response back to VC...")
+            
+            # Ensure voice client is still connected before playing
+            if vc.is_connected():
+                vc.play(discord.FFmpegPCMAudio(audio_stream, pipe=True))
+        else:
+            print("Gemini returned an empty response candidate.")
 
     except Exception as e:
         print(f"Error handling voice response pipeline: {e}")
@@ -77,13 +84,12 @@ class VoiceSink(discord.sinks.WaveSink):
         self.vc = vc
 
     def callback(self, user_id, file, error):
-        # When recording halts, save the voice file and trigger the processing engine
         if not error:
             audio_path = f"user_{user_id}.wav"
             with open(audio_path, "wb") as f:
                 f.write(file.read())
             
-            # Initiate async task execution pipeline
+            # Initiate async task execution pipeline safely
             bot.loop.create_task(process_and_speak(self.vc, audio_path))
 
 async def assistant_listening_loop(vc):
@@ -92,19 +98,25 @@ async def assistant_listening_loop(vc):
     """
     print("Starting continuous live listening loop...")
     while vc.is_connected():
-        if vc.is_playing():
-            await asyncio.sleep(0.5)
-            continue
+        try:
+            if vc.is_playing():
+                await asyncio.sleep(1)
+                continue
 
-        # Record audio windows to capture conversation chunks
-        sink = VoiceSink(vc)
-        vc.start_recording(sink)
-        await asyncio.sleep(5)  # Listens for speech in 5-second sampling cycles
-        vc.stop_recording()     # Cuts the sink and fires off processing execution
-        
-        # Give the bot time to finish its response stream before sampling background room data again
-        while vc.is_playing():
-            await asyncio.sleep(0.5)
+            # Record audio windows to capture conversation chunks
+            sink = VoiceSink(vc)
+            vc.start_recording(sink)
+            await asyncio.sleep(4)  # Listens for speech in 4-second sampling cycles
+            
+            if vc.recording:
+                vc.stop_recording()     # Cuts the sink and fires off processing execution
+            
+            # Give the bot time to finish its response stream before sampling again
+            while vc.is_playing():
+                await asyncio.sleep(0.5)
+        except Exception as loop_err:
+            print(f"Voice loop cycle encountered an anomaly: {loop_err}")
+            await asyncio.sleep(1)
 
 # --- NATIVE PY-CORD SLASH COMMANDS ---
 
@@ -119,10 +131,15 @@ async def ai(ctx: discord.ApplicationContext):
     await ctx.respond(f"🤖 **Google Assistant Activated** in **{channel.name}**! Speak freely, I am listening.")
 
     try:
-        vc = await channel.connect()
+        # Disconnect from any old lingering voice instances first to clear the socket
+        if ctx.guild.voice_client:
+            await ctx.guild.voice_client.disconnect(force=True)
+            
+        vc = await channel.connect(timeout=20.0, reconnect=True)
         # Launch the async loop infrastructure task
         bot.loop.create_task(assistant_listening_loop(vc))
     except Exception as e:
+        print(f"Voice connection failure: {e}")
         await ctx.send(content=f"❌ Voice interface failed: {e}")
 
 # 2. Voice Assistant Deactivation Switch
@@ -149,7 +166,7 @@ async def ask(ctx: discord.ApplicationContext, prompt: str):
 async def imagine(ctx: discord.ApplicationContext, prompt: str):
     await ctx.defer()
     try:
-        # Create a temporary client pinned explicitly to v1beta to resolve the 404 endpoint routing
+        # Explicitly pinning to the v1beta endpoint version to fully clear the 404 routing error
         beta_client = genai.Client(api_key=GEMINI_KEY, http_options={'api_version': 'v1beta'})
         
         result = beta_client.models.generate_images(
