@@ -5,6 +5,7 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 from google import genai
+from google.genai import types
 
 # Load configuration values from environment variables
 load_dotenv()
@@ -21,17 +22,11 @@ class AssistantBot(commands.Bot):
         intents.voice_states = True  # Required to record and stream audio features
         super().__init__(command_prefix="!", intents=intents)
 
-    async def setup_hook(self):
-        # Py-cord synchronizes application commands automatically
-        await self.tree.sync()
-        print("All slash commands synced successfully!")
+    async def on_ready(self):
+        print(f'🎙️ Google Assistant Mode Active as {self.user.name}')
+        print("Application is live and running 24/7 via Gemini engine.")
 
 bot = AssistantBot()
-
-@bot.event
-async def on_ready():
-    print(f'🎙️ Google Assistant Mode Active as {bot.user.name}')
-    print("Application is live and running 24/7 via Gemini engine.")
 
 # --- VOICE LOGIC PROCESSING ---
 
@@ -51,10 +46,10 @@ async def process_and_speak(vc, audio_path):
         response = ai_client.models.generate_content(
             model='gemini-2.5-flash',
             contents=[
-                {"mime_type": "audio/wav", "data": audio_bytes},
+                types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
                 "You are a helpful voice assistant like Google Assistant. Listen to the user's voice message above and reply with a short, natural, single-sentence spoken response."
             ],
-            config=dict(
+            config=types.GenerateContentConfig(
                 response_mime_type="audio/mp3"  # Instructs Gemini to reply directly with an audio format
             )
         )
@@ -108,50 +103,50 @@ async def assistant_listening_loop(vc):
         while vc.is_playing():
             await asyncio.sleep(0.5)
 
-# --- SLASH COMMANDS CONTROLLER ---
+# --- NATIVE PY-CORD SLASH COMMANDS ---
 
 # 1. Real-Time Assistant /ai Activation (Voice Loop)
-@bot.tree.command(name="ai", description="Turn on real-time Google Assistant mode in your current VC")
-async def ai(interaction: discord.Interaction):
-    if not interaction.user.voice:
-        await interaction.response.send_message("❌ You must join a voice channel first!")
+@bot.slash_command(name="ai", description="Turn on real-time Google Assistant mode in your current VC")
+async def ai(ctx: discord.ApplicationContext):
+    if not ctx.author.voice:
+        await ctx.respond("❌ You must join a voice channel first!")
         return
 
-    channel = interaction.user.voice.channel
-    await interaction.response.send_message(f"🤖 **Google Assistant Activated** in **{channel.name}**! Speak freely, I am listening.")
+    channel = ctx.author.voice.channel
+    await ctx.respond(f"🤖 **Google Assistant Activated** in **{channel.name}**! Speak freely, I am listening.")
 
     try:
         vc = await channel.connect()
         # Launch the async loop infrastructure task
         bot.loop.create_task(assistant_listening_loop(vc))
     except Exception as e:
-        await interaction.followup.send(content=f"❌ Voice interface failed: {e}")
+        await ctx.send(content=f"❌ Voice interface failed: {e}")
 
 # 2. Voice Assistant Deactivation Switch
-@bot.tree.command(name="stop_ai", description="Stop the voice assistant loop and disconnect the bot")
-async def stop_ai(interaction: discord.Interaction):
-    if interaction.guild.voice_client:
-        await interaction.guild.voice_client.disconnect()
-        await interaction.response.send_message("👋 Assistant deactivated. Goodbye!")
+@bot.slash_command(name="stop_ai", description="Stop the voice assistant loop and disconnect the bot")
+async def stop_ai(ctx: discord.ApplicationContext):
+    if ctx.guild.voice_client:
+        await ctx.guild.voice_client.disconnect()
+        await ctx.respond("👋 Assistant deactivated. Goodbye!")
     else:
-        await interaction.response.send_message("❌ I am not connected to any voice channel.")
+        await ctx.respond("❌ I am not connected to any voice channel.")
 
 # 3. Text Assistant Interface (/ask)
-@bot.tree.command(name="ask", description="Ask Gemini a question via text")
-async def ask(interaction: discord.Interaction, prompt: str):
-    await interaction.response.defer()
+@bot.slash_command(name="ask", description="Ask Gemini a question via text")
+async def ask(ctx: discord.ApplicationContext, prompt: str):
+    await ctx.defer()
     try:
         response = ai_client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-        await interaction.followup.send(content=f"🤖 **Gemini Response:**\n{response.text}")
+        await ctx.respond(f"🤖 **Gemini Response:**\n{response.text}")
     except Exception as e:
-        await interaction.followup.send(content=f"❌ Error communicating with Gemini API: {e}")
+        await ctx.respond(f"❌ Error communicating with Gemini API: {e}")
 
 # 4. Corrected Image Generation Engine (/imagine)
-@bot.tree.command(name="imagine", description="Generate a high-quality image using Imagen 3")
-async def imagine(interaction: discord.Interaction, prompt: str):
-    await interaction.response.defer()
+@bot.slash_command(name="imagine", description="Generate a high-quality image using Imagen 3")
+async def imagine(ctx: discord.ApplicationContext, prompt: str):
+    await ctx.defer()
     try:
-        # Using the corrected model string formatting required by the google-genai SDK
+        # Using the standard production identifier format with proper dictionary configs
         result = ai_client.models.generate_images(
             model='imagen-3.0-generate-002',
             prompt=prompt,
@@ -166,11 +161,11 @@ async def imagine(interaction: discord.Interaction, prompt: str):
             generated_image = result.generated_images[0]
             image_bytes = io.BytesIO(generated_image.image.image_bytes)
             discord_file = discord.File(fp=image_bytes, filename="imagine.jpg")
-            await interaction.followup.send(content=f"🎨 **Imagen 3 Output for:** *\"{prompt}\"*", file=discord_file)
+            await ctx.respond(content=f"🎨 **Imagen 3 Output for:** *\"{prompt}\"*", file=discord_file)
         else:
-            await interaction.followup.send(content="❌ API succeeded but returned no image data.")
+            await ctx.respond("❌ API succeeded but returned no image data.")
             
     except Exception as e:
-        await interaction.followup.send(content=f"❌ Failed to generate image: {e}")
+        await ctx.respond(f"❌ Failed to generate image: {e}")
 
 bot.run(TOKEN)
