@@ -42,11 +42,14 @@ async def process_and_speak(vc, audio_path):
         with open(audio_path, "rb") as f:
             audio_bytes = f.read()
 
-        # Send the raw voice directly to Gemini with explicit system instructions
+        # FIXED: Pass the audio payload properly using the new SDK types structure
         response = ai_client.models.generate_content(
             model='gemini-2.5-flash',
             contents=[
-                types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
+                types.Part.from_bytes(
+                    data=audio_bytes,
+                    mime_type="audio/wav"
+                ),
                 "You are a helpful voice assistant like Google Assistant. Listen to the user's voice message above and reply with a short, natural, single-sentence spoken response."
             ],
             config=types.GenerateContentConfig(
@@ -54,7 +57,7 @@ async def process_and_speak(vc, audio_path):
             )
         )
 
-        # Extract the raw spoken audio bytes from the response
+        # Extract the raw spoken audio bytes from the response candidates safely
         reply_audio_data = response.candidates[0].content.parts[0].inline_data.data
         audio_stream = io.BytesIO(reply_audio_data)
 
@@ -146,11 +149,11 @@ async def ask(ctx: discord.ApplicationContext, prompt: str):
 async def imagine(ctx: discord.ApplicationContext, prompt: str):
     await ctx.defer()
     try:
-        # Using the standard production identifier format with proper dictionary configs
+        # FIXED: Call the updated SDK generate_images API matching the updated v1 endpoint specs
         result = ai_client.models.generate_images(
             model='imagen-3.0-generate-002',
             prompt=prompt,
-            config=dict(
+            config=types.GenerateImagesConfig(
                 number_of_images=1,
                 output_mime_type="image/jpeg",
                 aspect_ratio="1:1"
