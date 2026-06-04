@@ -21,7 +21,6 @@ class GeminiDiscordBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
-        # Synchronize slash commands globally across all guilds
         await self.tree.sync()
         print("Slash commands synced successfully!")
 
@@ -29,7 +28,7 @@ bot = GeminiDiscordBot()
 
 @bot.event
 async def on_ready():
-    print(f'🤖 Bot logged in as {bot.user.name} (ID: {bot.user.id})')
+    print(f'🤖 Bot logged in as {bot.user.name}')
     print("Application is live and running 24/7 via Gemini engine.")
 
 # 1. /ask Command (Gemini 2.5 Flash Text Generation)
@@ -48,10 +47,12 @@ async def ask(interaction: discord.Interaction, prompt: str):
         if len(reply) > 1950:
             reply = reply[:1950] + "... (truncated due to length limits)"
             
-        await interaction.followup.send(f"🤖 **Gemini Response:**
-{reply}")
+        # FIXED LINE 51 FIX: Handled as clean variables
+        output_text = f"🤖 **Gemini Response:**\n{reply}"
+        await interaction.followup.send(content=output_text)
+        
     except Exception as e:
-        await interaction.followup.send(f"❌ Error communicating with Gemini API: {e}")
+        await interaction.followup.send(content=f"❌ Error communicating with Gemini API: {e}")
 
 # 2. /imagine Command (Imagen 3 Image Generation)
 @bot.tree.command(name="imagine", description="Generate a high-quality image using Imagen 3")
@@ -70,16 +71,16 @@ async def imagine(interaction: discord.Interaction, prompt: str):
             )
         )
         
-        # Capture raw image data streaming into a sendable Discord file attachment
         generated_image = result.generated_images[0]
         image_bytes = io.BytesIO(generated_image.image.image_bytes)
         discord_file = discord.File(fp=image_bytes, filename="imagine.jpg")
         
-        await interaction.followup.send(content=f"🎨 **Imagen 3 Output for:** *"{prompt}"*", file=discord_file)
+        caption = f"🎨 **Imagen 3 Output for:** *\"{prompt}\"*"
+        await interaction.followup.send(content=caption, file=discord_file)
     except Exception as e:
-        await interaction.followup.send(f"❌ Failed to generate image: {e}")
+        await interaction.followup.send(content=f"❌ Failed to generate image: {e}")
 
-# 3. /ai Command (Voice Framework with Nixpacks Native FFmpeg support)
+# 3. /ai Command (Voice Framework placeholder)
 @bot.tree.command(name="ai", description="Make the bot join your VC and speak")
 async def ai(interaction: discord.Interaction):
     if not interaction.user.voice:
@@ -93,6 +94,6 @@ async def ai(interaction: discord.Interaction):
         vc = await channel.connect()
         print(f"Connected successfully to voice channel {channel.name}")
     except Exception as e:
-        await interaction.followup.send(f"❌ Failed to establish voice connection: {e}")
+        await interaction.followup.send(content=f"❌ Failed to establish voice connection: {e}")
 
 bot.run(TOKEN)
