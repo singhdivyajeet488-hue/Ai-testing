@@ -42,7 +42,7 @@ async def process_and_speak(vc, audio_path):
         with open(audio_path, "rb") as f:
             audio_bytes = f.read()
 
-        # FIXED: Pass the audio payload properly using the new SDK types structure
+        # Target the correct model using standard generate_content
         response = ai_client.models.generate_content(
             model='gemini-2.5-flash',
             contents=[
@@ -149,8 +149,10 @@ async def ask(ctx: discord.ApplicationContext, prompt: str):
 async def imagine(ctx: discord.ApplicationContext, prompt: str):
     await ctx.defer()
     try:
-        # FIXED: Call the updated SDK generate_images API matching the updated v1 endpoint specs
-        result = ai_client.models.generate_images(
+        # Create a temporary client pinned explicitly to v1beta to resolve the 404 endpoint routing
+        beta_client = genai.Client(api_key=GEMINI_KEY, http_options={'api_version': 'v1beta'})
+        
+        result = beta_client.models.generate_images(
             model='imagen-3.0-generate-002',
             prompt=prompt,
             config=types.GenerateImagesConfig(
