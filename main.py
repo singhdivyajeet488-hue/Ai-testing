@@ -144,48 +144,36 @@ async def ask(interaction: discord.Interaction, prompt: str):
     await interaction.response.defer()
     try:
         response = ai_client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-        await interaction.followup.send(content=f"🤖 **Gemini Response:**
-{response.text}")
+        await interaction.followup.send(content=f"🤖 **Gemini Response:**\n{response.text}")
     except Exception as e:
         await interaction.followup.send(content=f"❌ Error communicating with Gemini API: {e}")
 
-# 4. Fallback Image Generation Engine (/imagine)
+# 4. Corrected Image Generation Engine (/imagine)
 @bot.tree.command(name="imagine", description="Generate a high-quality image using Imagen 3")
 @app_commands.describe(prompt="Describe the image you want to create")
 async def imagine(interaction: discord.Interaction, prompt: str):
     await interaction.response.defer()
-    
-    # Try different string formats for the Imagen model to bypass API version locks
-    models_to_try = ['imagen-3.0-generate-002', 'imagen-3.0']
-    result = None
-    last_error = ""
-
-    for model_name in models_to_try:
-        try:
-            result = ai_client.models.generate_images(
-                model=model_name,
-                prompt=prompt,
-                config=dict(
-                    number_of_images=1,
-                    output_mime_type="image/jpeg",
-                    aspect_ratio="1:1"
-                )
+    try:
+        # Using the absolute production string identifier for the GenAI SDK
+        result = ai_client.models.generate_images(
+            model='imagen-3.0-generate-002',
+            prompt=prompt,
+            config=dict(
+                number_of_images=1,
+                output_mime_type="image/jpeg",
+                aspect_ratio="1:1"
             )
-            if result and result.generated_images:
-                break
-        except Exception as e:
-            last_error = str(e)
-            continue
+        )
 
-    if result and result.generated_images:
-        try:
+        if result and result.generated_images:
             generated_image = result.generated_images[0]
             image_bytes = io.BytesIO(generated_image.image.image_bytes)
             discord_file = discord.File(fp=image_bytes, filename="imagine.jpg")
-            await interaction.followup.send(content=f"🎨 **Imagen 3 Output for:** *"{prompt}"*", file=discord_file)
-        except Exception as e:
-            await interaction.followup.send(content=f"❌ Error rendering output file attachment: {e}")
-    else:
-        await interaction.followup.send(content=f"❌ Failed to generate image. API Error: {last_error}")
+            await interaction.followup.send(content=f"🎨 **Imagen 3 Output for:** *\"{prompt}\"*", file=discord_file)
+        else:
+            await interaction.followup.send(content="❌ API succeeded but returned no image data.")
+            
+    except Exception as e:
+        await interaction.followup.send(content=f"❌ Failed to generate image: {e}")
 
 bot.run(TOKEN)
