@@ -1,0 +1,191 @@
+import os
+import io
+import asyncio
+import discord
+from discord.ext import commands
+from discord import app_commands
+from dotenv import load_dotenv
+from google import genai
+
+# Load configuration values from environment variables
+load_dotenv()
+TOKEN = os.getenv('DISCORD_BOT_TOKEN')
+GEMINI_KEY = os.getenv('GEMINI_API_KEY')
+
+# Initialize the official Google GenAI Client
+ai_client = genai.Client(api_key=GEMINI_KEY)
+
+class AssistantBot(commands.Bot):
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.voice_states = True  # Required to record and stream audio features
+        super().__init__(command_prefix="!", intents=intents)
+
+    async def setup_hook(self):
+        # Synchronize slash commands globally across all servers
+        await self.tree.sync()
+        print("All system commands synced successfully!")
+
+bot = AssistantBot()
+
+@bot.event
+async def on_ready():
+    print(f'🎙️ Google Assistant Mode Active as {bot.user.name}')
+    print("Application is live and running 24/7 via Gemini engine.")
+
+# --- VOICE LOGIC PROCESSING ---
+
+async def process_and_speak(vc, audio_path):
+    """
+    Takes the recorded voice file, sends it to Gemini to interpret,
+    and streams the voice response back out loud.
+    """
+    try:
+        print("Processing audio file with Gemini...")
+        
+        # Open the recorded audio file from the voice channel session
+        with open(audio_path, "rb") as f:
+            audio_bytes = f.read()
+
+        # Send the raw voice directly to Gemini with explicit system instructions
+        response = ai_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=[
+                {"mime_type": "audio/wav", "data": audio_bytes},
+                "You are a helpful voice assistant like Google Assistant. Listen to the user's voice message above and reply with a short, natural, single-sentence spoken response."
+            ],
+            config=dict(
+                response_mime_type="audio/mp3"  # Instructs Gemini to reply directly with an audio format
+            )
+        )
+
+        # Extract the raw spoken audio bytes from the response
+        reply_audio_data = response.candidates[0].content.parts[0].inline_data.data
+        audio_stream = io.BytesIO(reply_audio_data)
+
+        # Play the response audio directly back inside the voice channel
+        print("Streaming Gemini voice response back to VC...")
+        vc.play(discord.FFmpegPCMAudio(audio_stream, pipe=True))
+
+    except Exception as e:
+        print(f"Error handling voice response pipeline: {e}")
+
+class VoiceSink(discord.sinks.WaveSink):
+    """
+    Custom audio receiver that catches the user's raw voice data streams.
+    """
+    def __init__(self, vc, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.vc = vc
+
+    def callback(self, user_id, file, error):
+        # When recording halts, save the voice file and trigger the processing engine
+        if not error:
+            audio_path = f"user_{user_id}.wav"
+            with open(audio_path, "wb") as f:
+                f.write(file.read())
+            
+            # Initiate async task execution pipeline
+            bot.loop.create_task(process_and_speak(self.vc, audio_path))
+
+async def assistant_listening_loop(vc):
+    """
+    Continuous loop infrastructure that handles the recording cycles.
+    """
+    print("Starting continuous live listening loop...")
+    while vc.is_connected():
+        if vc.is_playing():
+            await asyncio.sleep(0.5)
+            continue
+
+        # Record audio windows to capture conversation chunks
+        sink = VoiceSink(vc)
+        vc.start_recording(sink)
+        await asyncio.sleep(5)  # Listens for speech in 5-second sampling cycles
+        vc.stop_recording()     # Cuts the sink and fires off processing execution
+        
+        # Give the bot time to finish its response stream before sampling background room data again
+        while vc.is_playing():
+            await asyncio.sleep(0.5)
+
+# --- SLASH COMMANDS CONTROLLER ---
+
+# 1. Real-Time Assistant /ai Activation (Voice Loop)
+@bot.tree.command(name="ai", description="Turn on real-time Google Assistant mode in your current VC")
+async def ai(interaction: discord.Interaction):
+    if not interaction.user.voice:
+        await interaction.response.send_message("❌ You must join a voice channel first!")
+        return
+
+    channel = interaction.user.voice.channel
+    await interaction.response.send_message(f"🤖 **Google Assistant Activated** in **{channel.name}**! Speak freely, I am listening.")
+
+    try:
+        vc = await channel.connect()
+        # Launch the async loop infrastructure task
+        bot.loop.create_task(assistant_listening_loop(vc))
+    except Exception as e:
+        await interaction.followup.send(content=f"❌ Voice interface failed: {e}")
+
+# 2. Voice Assistant Deactivation Switch
+@bot.tree.command(name="stop_ai", description="Stop the voice assistant loop and disconnect the bot")
+async def stop_ai(interaction: discord.Interaction):
+    if interaction.guild.voice_client:
+        await interaction.guild.voice_client.disconnect()
+        await interaction.response.send_message("👋 Assistant deactivated. Goodbye!")
+    else:
+        await interaction.response.send_message("❌ I am not connected to any voice channel.")
+
+# 3. Text Assistant Interface (/ask)
+@bot.tree.command(name="ask", description="Ask Gemini a question via text")
+@app_commands.describe(prompt="What do you want to ask Gemini?")
+async def ask(interaction: discord.Interaction, prompt: str):
+    await interaction.response.defer()
+    try:
+        response = ai_client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        await interaction.followup.send(content=f"🤖 **Gemini Response:**
+{response.text}")
+    except Exception as e:
+        await interaction.followup.send(content=f"❌ Error communicating with Gemini API: {e}")
+
+# 4. Fallback Image Generation Engine (/imagine)
+@bot.tree.command(name="imagine", description="Generate a high-quality image using Imagen 3")
+@app_commands.describe(prompt="Describe the image you want to create")
+async def imagine(interaction: discord.Interaction, prompt: str):
+    await interaction.response.defer()
+    
+    # Try different string formats for the Imagen model to bypass API version locks
+    models_to_try = ['imagen-3.0-generate-002', 'imagen-3.0']
+    result = None
+    last_error = ""
+
+    for model_name in models_to_try:
+        try:
+            result = ai_client.models.generate_images(
+                model=model_name,
+                prompt=prompt,
+                config=dict(
+                    number_of_images=1,
+                    output_mime_type="image/jpeg",
+                    aspect_ratio="1:1"
+                )
+            )
+            if result and result.generated_images:
+                break
+        except Exception as e:
+            last_error = str(e)
+            continue
+
+    if result and result.generated_images:
+        try:
+            generated_image = result.generated_images[0]
+            image_bytes = io.BytesIO(generated_image.image.image_bytes)
+            discord_file = discord.File(fp=image_bytes, filename="imagine.jpg")
+            await interaction.followup.send(content=f"🎨 **Imagen 3 Output for:** *"{prompt}"*", file=discord_file)
+        except Exception as e:
+            await interaction.followup.send(content=f"❌ Error rendering output file attachment: {e}")
+    else:
+        await interaction.followup.send(content=f"❌ Failed to generate image. API Error: {last_error}")
+
+bot.run(TOKEN)

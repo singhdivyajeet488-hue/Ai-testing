@@ -1,0 +1,4 @@
+py-cord[voice]
+google-genai
+python-dotenv
+pillow
