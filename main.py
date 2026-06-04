@@ -3,7 +3,6 @@ import io
 import asyncio
 import discord
 from discord.ext import commands
-from discord import app_commands
 from dotenv import load_dotenv
 from google import genai
 
@@ -23,9 +22,9 @@ class AssistantBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
-        # Synchronize slash commands globally across all servers
+        # Py-cord synchronizes application commands automatically
         await self.tree.sync()
-        print("All system commands synced successfully!")
+        print("All slash commands synced successfully!")
 
 bot = AssistantBot()
 
@@ -139,7 +138,6 @@ async def stop_ai(interaction: discord.Interaction):
 
 # 3. Text Assistant Interface (/ask)
 @bot.tree.command(name="ask", description="Ask Gemini a question via text")
-@app_commands.describe(prompt="What do you want to ask Gemini?")
 async def ask(interaction: discord.Interaction, prompt: str):
     await interaction.response.defer()
     try:
@@ -150,11 +148,10 @@ async def ask(interaction: discord.Interaction, prompt: str):
 
 # 4. Corrected Image Generation Engine (/imagine)
 @bot.tree.command(name="imagine", description="Generate a high-quality image using Imagen 3")
-@app_commands.describe(prompt="Describe the image you want to create")
 async def imagine(interaction: discord.Interaction, prompt: str):
     await interaction.response.defer()
     try:
-        # Using the absolute production string identifier for the GenAI SDK
+        # Using the corrected model string formatting required by the google-genai SDK
         result = ai_client.models.generate_images(
             model='imagen-3.0-generate-002',
             prompt=prompt,
