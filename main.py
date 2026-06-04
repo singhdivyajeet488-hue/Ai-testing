@@ -21,6 +21,7 @@ class GeminiDiscordBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
+        # Synchronize slash commands globally across all servers
         await self.tree.sync()
         print("Slash commands synced successfully!")
 
@@ -47,14 +48,13 @@ async def ask(interaction: discord.Interaction, prompt: str):
         if len(reply) > 1950:
             reply = reply[:1950] + "... (truncated due to length limits)"
             
-        # FIXED LINE 51 FIX: Handled as clean variables
         output_text = f"🤖 **Gemini Response:**\n{reply}"
         await interaction.followup.send(content=output_text)
         
     except Exception as e:
         await interaction.followup.send(content=f"❌ Error communicating with Gemini API: {e}")
 
-# 2. /imagine Command (Imagen 3 Image Generation)
+# 2. /imagine Command (Stable Production Imagen 3 Identifier)
 @bot.tree.command(name="imagine", description="Generate a high-quality image using Imagen 3")
 @app_commands.describe(prompt="Describe the image you want to create")
 async def imagine(interaction: discord.Interaction, prompt: str):
@@ -62,7 +62,7 @@ async def imagine(interaction: discord.Interaction, prompt: str):
     
     try:
         result = ai_client.models.generate_images(
-            model='imagen-3.0-generate-002',
+            model='imagen-3.0',  # Using the stable production identifier to prevent 404s
             prompt=prompt,
             config=dict(
                 number_of_images=1,
@@ -71,16 +71,17 @@ async def imagine(interaction: discord.Interaction, prompt: str):
             )
         )
         
+        # Capture raw image data streaming into a sendable Discord file attachment
         generated_image = result.generated_images[0]
         image_bytes = io.BytesIO(generated_image.image.image_bytes)
         discord_file = discord.File(fp=image_bytes, filename="imagine.jpg")
         
-        caption = f"🎨 **Imagen 3 Output for:** *\"{prompt}\"*"
+        caption = f"🎨 **Imagen 3 Output for:** *\"{prompt}\"*";
         await interaction.followup.send(content=caption, file=discord_file)
     except Exception as e:
         await interaction.followup.send(content=f"❌ Failed to generate image: {e}")
 
-# 3. /ai Command (Voice Framework placeholder)
+# 3. /ai Command (Voice Framework Placeholder)
 @bot.tree.command(name="ai", description="Make the bot join your VC and speak")
 async def ai(interaction: discord.Interaction):
     if not interaction.user.voice:
